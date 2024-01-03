@@ -5,80 +5,54 @@
 #include <functional>
 #include <unordered_map>
 #include <limits>
-#include <cstdio>
-#include <cmath>
 
 using namespace std;
 
-const int NINF = -1e9;
+vector<vector<int>> graph;
+vector<vector<int>> reverseGraph;
+vector<pair<int, int>> relationships;
+vector<bool> vis;                // Store node visit status for DFS
+vector<int> node_order;          // Store nodes in order of their finish time in DFS
+vector<vector<int>> sccList;     // Store SCCs here
+vector<vector<int>> mergedGraph; // Merge SCCs here
 
-// Depth-First Search for the original graph
-void dfs(int start, const vector<vector<int>> &graph, vector<bool> &visited, vector<int> &node_order)
+const int INF = numeric_limits<int>::min();
+
+// Travel the whole graph and put nodes in a node_order according to their finish time
+void dfs(int n, const vector<vector<int>> &graph, vector<bool> &visited, vector<int> &node_order)
 {
-    stack<int> s;
-    s.push(start);
+    if (visited[n])
+        return; // If node is already visited
 
-    while (!s.empty())
+    visited[n] = true;
+
+    for (int neighbor : graph[n])
     {
-        int n = s.top();
+        dfs(neighbor, graph, visited, node_order);
+    }
 
-        // Check if all neighbors are visited
-        bool all_neighbors_visited = true;
-        for (int neighbor : graph[n])
-        {
-            if (!visited[neighbor])
-            {
-                all_neighbors_visited = false;
-                s.push(neighbor);
-                visited[neighbor] = true; // Mark the neighbor as visited immediately
-                break;
-            }
-        }
+    node_order.push_back(n);
+}
 
-        // If all neighbors are visited, pop the current node
-        if (all_neighbors_visited)
-        {
-            s.pop();
-            node_order.push_back(n);
-        }
+// Traverse the reverseGraph in order to find SCCs
+void reverseDFS(int n, vector<int> &currentSCC)
+{
+    if (vis[n] == true)
+        return; // If node is already visited
+
+    int len = reverseGraph[n].size();
+    currentSCC.push_back(n);
+    vis[n] = true;
+
+    for (int i = 0; i < len; i++)
+    {
+        reverseDFS(reverseGraph[n][i], currentSCC);
     }
 }
 
-// Depth-First Search for the reversed graph to find Strongly Connected Components (SCCs)
-void reverseDFS(int start, vector<int> &currentSCC, const vector<vector<int>> &reverseGraph, vector<bool> &vis)
+// N nodes, find every SCC (single nodes are SCCs)
+vector<vector<int>> kosarajuSCC(int n)
 {
-    stack<int> s;
-    s.push(start);
-
-    while (!s.empty())
-    {
-        int n = s.top();
-        s.pop();
-
-        if (vis[n])
-            continue; // If node is already visited
-
-        int len = reverseGraph[n].size();
-        currentSCC.push_back(n);
-        vis[n] = true;
-
-        for (int i = 0; i < len; i++)
-        {
-            int neighbor = reverseGraph[n][i];
-            if (!vis[neighbor])
-            {
-                s.push(neighbor);
-            }
-        }
-    }
-}
-
-// Kosaraju's Algorithm to find Strongly Connected Components (SCCs)
-vector<vector<int>> kosarajuSCC(int n, const vector<vector<int>> &graph, const vector<vector<int>> &reverseGraph, vector<bool> &vis, vector<int> &node_order)
-{
-    vector<vector<int>> sccList;
-
-    // First DFS to get the order of nodes for the second pass
     for (int i = 1; i <= n; i++)
     {
         if (vis[i] == false)
@@ -87,19 +61,17 @@ vector<vector<int>> kosarajuSCC(int n, const vector<vector<int>> &graph, const v
         }
     }
 
-    // Reset visited array for the second pass
     for (int i = 1; i <= n; i++)
     {
         vis[i] = false;
     }
 
-    // Second DFS to find SCCs based on the reversed order
     for (int i = node_order.size() - 1; i >= 0; i--)
     {
         if (vis[node_order[i]] == false)
         {
             vector<int> currentSCC;
-            reverseDFS(node_order[i], currentSCC, reverseGraph, vis);
+            reverseDFS(node_order[i], currentSCC);
             sccList.push_back(currentSCC);
         }
     }
@@ -107,18 +79,30 @@ vector<vector<int>> kosarajuSCC(int n, const vector<vector<int>> &graph, const v
     return sccList;
 }
 
-// Merge SCCs and create a new graph
-vector<vector<int>> mergeSCC(int n, int m, const vector<vector<int>> &graph, const vector<pair<int, int>> &relationships, const vector<vector<int>> &sccList)
+// Function to merge SCCs into a new graph
+vector<vector<int>> mergeSCC(int n, int m, const vector<vector<int>> &graph, const vector<vector<int>> &sccList)
 {
+    // Map each node to its minimum value within the SCC
     unordered_map<int, int> minNodeMap;
 
-    // Determine the minimum node in each SCC
     for (const auto &scc : sccList)
     {
+        // Check if the size of the SCC is greater than 1
         if (scc.size() > 1)
         {
-            int minValue = *min_element(scc.begin(), scc.end());
+            // Find the minimum value in the SCC
+            int minValue = scc[0];
 
+            for (size_t i = 1; i < scc.size(); ++i)
+            {
+                // Update the minimum value if the current element is smaller
+                if (scc[i] < minValue)
+                {
+                    minValue = scc[i];
+                }
+            }
+
+            // Map each node to the minimum value within the SCC
             for (const int &node : scc)
             {
                 minNodeMap[node] = minValue;
@@ -126,18 +110,27 @@ vector<vector<int>> mergeSCC(int n, int m, const vector<vector<int>> &graph, con
         }
         else
         {
+            // If SCC has size 1, map the single node to itself
             minNodeMap[scc[0]] = scc[0];
         }
     }
 
-    // Create a new graph by merging nodes in SCCs
-    vector<vector<int>> mergedGraph(minNodeMap.size() + 1);
+    // Replace nodes in relationships using the mapping
+    for (auto &relationship : relationships)
+    {
+        relationship.first = minNodeMap[relationship.first];
+        relationship.second = minNodeMap[relationship.second];
+    }
+
+    // Build mergedGraph using the updated relationships
+    vector<vector<int>> mergedGraph(minNodeMap.size() + 1); // Vertices are numbered from 1 to minNodeMap.size()
 
     for (const auto &relationship : relationships)
     {
-        int a = minNodeMap[relationship.first];
-        int b = minNodeMap[relationship.second];
+        int a = relationship.first;
+        int b = relationship.second;
 
+        // Check if a and b are equal
         if (a != b)
         {
             mergedGraph[a].push_back(b);
@@ -147,8 +140,7 @@ vector<vector<int>> mergeSCC(int n, int m, const vector<vector<int>> &graph, con
     return mergedGraph;
 }
 
-// Utility function for Topological Sort
-void topologicalSortUtil(int v, vector<bool> &visited, const vector<vector<int>> &graph, vector<int> &order)
+void topologicalSortUtil(int v, vector<bool> &visited, vector<vector<int>> &graph, vector<int> &order)
 {
     visited[v] = true;
     for (int u : graph[v])
@@ -161,12 +153,11 @@ void topologicalSortUtil(int v, vector<bool> &visited, const vector<vector<int>>
     order.push_back(v);
 }
 
-// Topological Sort of a graph
-vector<int> topologicalSort(const vector<vector<int>> &graph, int V)
+vector<int> topologicalSort(vector<vector<int>> &graph, int V)
 {
-    vector<bool> visited(V + 1, false); // Adjust for 1-based indexing
+    vector<bool> visited(V, false);
     vector<int> order;
-    for (int i = 1; i <= V; ++i) // Start from 1
+    for (int i = 0; i < V; ++i)
     {
         if (!visited[i])
         {
@@ -177,17 +168,16 @@ vector<int> topologicalSort(const vector<vector<int>> &graph, int V)
     return order;
 }
 
-// Longest path in a Directed Acyclic Graph (DAG)
-int longestPath(int src, const vector<vector<int>> &graph, int n, const vector<int> &order)
+int longestPath(int src, vector<vector<int>> &graph, vector<int> &order)
 {
-    vector<int> dist(n + 1, NINF);
+    int V = graph.size();
+    vector<int> dist(V, INF);
     dist[src] = 0;
 
-    // Update the distance for each node based on topological order
-    for (int i = 0; i < n; ++i)
+    for (int i = 0; i < V; ++i)
     {
         int u = order[i];
-        if (dist[u] != NINF)
+        if (dist[u] != INF)
         {
             for (int v : graph[u])
             {
@@ -202,19 +192,17 @@ int longestPath(int src, const vector<vector<int>> &graph, int n, const vector<i
     return *max_element(dist.begin(), dist.end());
 }
 
-// Find the longest path in the merged SCC graph
-int findLongestPath(const vector<vector<int>> &graph, int n)
+int findLongestPath(vector<vector<int>> &graph)
 {
-    vector<int> order = topologicalSort(graph, n);
+    int V = graph.size();
+    vector<int> order = topologicalSort(graph, V);
 
-    int maxPathLength = NINF;
+    int maxPathLength = INF;
 
-    // Iterate over all nodes to find the longest path
-    for (int i = 1; i <= n; ++i)
+    for (int i = 0; i < V; ++i)
     {
-        int pathLength = longestPath(i, graph, n, order);
-        if (pathLength > maxPathLength)
-            maxPathLength = pathLength;
+        int pathLength = longestPath(i, graph, order);
+        maxPathLength = max(maxPathLength, pathLength);
     }
 
     return maxPathLength;
@@ -228,15 +216,11 @@ int main()
     scanf("%d", &n);
     scanf("%d", &m);
 
-    vector<vector<int>> graph(n + 1); // Vertices are numbered from 1 to n
-    vector<vector<int>> reverseGraph(n + 1);
-    vector<pair<int, int>> relationships;
-    vector<bool> vis(n + 1, false);
-    vector<int> node_order;
+    graph.resize(n + 1); // Vertices are numbered from 1 to n
+    reverseGraph.resize(n + 1);
+    vis.resize(n + 1, false);
 
-    relationships.reserve(m);
-
-    // Input validation and graph construction
+    // Input relationships (between a and b) and build the graph
     if (n >= 2 && m >= 0)
     {
         for (int i = 0; i < m; ++i)
@@ -246,23 +230,24 @@ int main()
             scanf("%d", &a);
             scanf("%d", &b);
 
+            // Check if the input is valid
             if (a > 0 && a <= n && b > 0 && b <= n)
             {
+                // Build the graph and reverseGraph directly
                 graph[a].push_back(b);
                 reverseGraph[b].push_back(a);
-                relationships.emplace_back(a, b);
+                relationships.push_back({a, b});
             }
         }
     }
 
-    // Find Strongly Connected Components (SCCs)
-    vector<vector<int>> sccList = kosarajuSCC(n, graph, reverseGraph, vis, node_order);
+    // Get SCCs in sccList
+    sccList = kosarajuSCC(n);
 
-    // Merge SCCs to create a new graph
-    vector<vector<int>> mergedGraph = mergeSCC(n, m, graph, relationships, sccList);
+    // Merge SCCs
+    vector<vector<int>> mergedGraph = mergeSCC(n, m, graph, sccList);
 
-    // Find and print the longest path in the merged SCC graph
-    int result = findLongestPath(mergedGraph, n);
+    int result = findLongestPath(mergedGraph);
 
     cout << result << endl;
 }
